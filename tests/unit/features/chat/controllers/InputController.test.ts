@@ -4,6 +4,13 @@ import { Notice } from 'obsidian';
 import { InputController, type InputControllerDeps } from '@/features/chat/controllers/InputController';
 import { ChatState } from '@/features/chat/state/ChatState';
 
+beforeAll(() => {
+  globalThis.requestAnimationFrame = (cb: FrameRequestCallback) => {
+    cb(0);
+    return 0;
+  };
+});
+
 const mockNotice = Notice as jest.Mock;
 
 function createMockInputEl() {
@@ -803,21 +810,21 @@ describe('InputController - Message Queue', () => {
     });
   });
 
-  describe('Approval modal tracking', () => {
-    it('should dismiss pending modal and clear reference', () => {
+  describe('Approval inline tracking', () => {
+    it('should dismiss pending inline and clear reference', () => {
       controller = new InputController(deps);
-      const mockModal = { close: jest.fn() };
-      (controller as any).pendingApprovalModal = mockModal;
+      const mockInline = { destroy: jest.fn() };
+      (controller as any).pendingApprovalInline = mockInline;
 
       controller.dismissPendingApproval();
 
-      expect(mockModal.close).toHaveBeenCalled();
-      expect((controller as any).pendingApprovalModal).toBeNull();
+      expect(mockInline.destroy).toHaveBeenCalled();
+      expect((controller as any).pendingApprovalInline).toBeNull();
     });
 
-    it('should be a no-op when no modal is pending', () => {
+    it('should be a no-op when no inline is pending', () => {
       controller = new InputController(deps);
-      expect((controller as any).pendingApprovalModal).toBeNull();
+      expect((controller as any).pendingApprovalInline).toBeNull();
       expect(() => controller.dismissPendingApproval()).not.toThrow();
     });
   });
@@ -1278,21 +1285,70 @@ describe('InputController - Message Queue', () => {
   });
 
   describe('handleApprovalRequest', () => {
-    it('should create and store approval modal as pending', async () => {
+    it('should create inline approval and store as pending', async () => {
+      const parentEl = createMockEl();
+      const inputContainerEl = createMockEl();
+      (inputContainerEl as any).parentElement = parentEl;
+      deps.getInputContainerEl = () => inputContainerEl as any;
+
       controller = new InputController(deps);
 
-      // void: promise won't resolve until the approval callback fires
-      void controller.handleApprovalRequest(
+      // Start approval request — it will await the inline resolve
+      const approvalPromise = controller.handleApprovalRequest(
         'bash',
         { command: 'ls -la' },
         'Run shell command'
       );
 
-      expect((controller as any).pendingApprovalModal).not.toBeNull();
-      expect((controller as any).pendingApprovalModal.open).toHaveBeenCalled();
+      expect((controller as any).pendingApprovalInline).not.toBeNull();
 
+      // Simulate clicking "Allow once" by dismissing and checking cancel fallback
       controller.dismissPendingApproval();
-      expect((controller as any).pendingApprovalModal).toBeNull();
+      expect((controller as any).pendingApprovalInline).toBeNull();
+
+      const result = await approvalPromise;
+      expect(result).toBe('cancel');
+    });
+
+    it('should return cancel when input container has no parent', async () => {
+      const inputContainerEl = createMockEl();
+      // no parentElement set
+      deps.getInputContainerEl = () => inputContainerEl as any;
+
+      controller = new InputController(deps);
+      const result = await controller.handleApprovalRequest('bash', {}, 'test');
+      expect(result).toBe('cancel');
+    });
+
+    it.each([
+      ['Deny', 'deny'],
+      ['Allow once', 'allow'],
+      ['Always allow', 'allow-always'],
+    ] as const)('should return "%s" → "%s"', async (optionLabel, expected) => {
+      const parentEl = createMockEl();
+      const inputContainerEl = createMockEl();
+      (inputContainerEl as any).parentElement = parentEl;
+      deps.getInputContainerEl = () => inputContainerEl as any;
+
+      controller = new InputController(deps);
+
+      const approvalPromise = controller.handleApprovalRequest(
+        'bash',
+        { command: 'ls -la' },
+        'Run shell command',
+      );
+
+      // Find the rendered option item matching the label and click it
+      const items = parentEl.querySelectorAll('claudian-ask-item');
+      const target = items.find((item: any) => {
+        const label = item.querySelector('claudian-ask-item-label');
+        return label?.textContent === optionLabel;
+      });
+      expect(target).toBeDefined();
+      target!.click();
+
+      const result = await approvalPromise;
+      expect(result).toBe(expected);
     });
   });
 

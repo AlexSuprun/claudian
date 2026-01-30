@@ -1,6 +1,14 @@
 import type { AskUserQuestionItem, AskUserQuestionOption } from '../../../core/types/tools';
 
 const HINTS_TEXT = 'Enter to select \u00B7 Tab/Arrow keys to navigate \u00B7 Esc to cancel';
+const HINTS_TEXT_IMMEDIATE = 'Enter to select \u00B7 Arrow keys to navigate \u00B7 Esc to cancel';
+
+export interface InlineAskQuestionConfig {
+  title?: string;
+  headerEl?: HTMLElement;
+  showCustomInput?: boolean;
+  immediateSelect?: boolean;
+}
 
 export class InlineAskUserQuestion {
   private containerEl: HTMLElement;
@@ -8,6 +16,7 @@ export class InlineAskUserQuestion {
   private resolveCallback: (result: Record<string, string> | null) => void;
   private resolved = false;
   private signal?: AbortSignal;
+  private config: Required<Omit<InlineAskQuestionConfig, 'headerEl'>> & { headerEl?: HTMLElement };
 
   private questions: AskUserQuestionItem[] = [];
   private answers = new Map<number, Set<string>>();
@@ -30,11 +39,18 @@ export class InlineAskUserQuestion {
     input: Record<string, unknown>,
     resolve: (result: Record<string, string> | null) => void,
     signal?: AbortSignal,
+    config?: InlineAskQuestionConfig,
   ) {
     this.containerEl = containerEl;
     this.input = input;
     this.resolveCallback = resolve;
     this.signal = signal;
+    this.config = {
+      title: config?.title ?? 'Claude has a question',
+      headerEl: config?.headerEl,
+      showCustomInput: config?.showCustomInput ?? true,
+      immediateSelect: config?.immediateSelect ?? false,
+    };
     this.boundKeyDown = this.handleKeyDown.bind(this);
   }
 
@@ -42,7 +58,11 @@ export class InlineAskUserQuestion {
     this.rootEl = this.containerEl.createDiv({ cls: 'claudian-ask-question-inline' });
 
     const titleEl = this.rootEl.createDiv({ cls: 'claudian-ask-inline-title' });
-    titleEl.setText('Claude has a question');
+    titleEl.setText(this.config.title);
+
+    if (this.config.headerEl) {
+      this.rootEl.appendChild(this.config.headerEl);
+    }
 
     this.questions = this.parseQuestions();
 
@@ -56,10 +76,11 @@ export class InlineAskUserQuestion {
       this.customInputs.set(i, '');
     }
 
-    this.tabBar = this.rootEl.createDiv({ cls: 'claudian-ask-tab-bar' });
+    if (!this.config.immediateSelect) {
+      this.tabBar = this.rootEl.createDiv({ cls: 'claudian-ask-tab-bar' });
+      this.renderTabBar();
+    }
     this.contentArea = this.rootEl.createDiv({ cls: 'claudian-ask-content' });
-
-    this.renderTabBar();
     this.renderTabContent();
 
     this.rootEl.setAttribute('tabindex', '0');
@@ -165,7 +186,9 @@ export class InlineAskUserQuestion {
     this.activeTabIndex = clamped;
     this.focusedItemIndex = 0;
     this.isInputFocused = false;
-    this.renderTabBar();
+    if (!this.config.immediateSelect) {
+      this.renderTabBar();
+    }
     this.renderTabContent();
     this.rootEl.focus();
   }
@@ -230,47 +253,49 @@ export class InlineAskUserQuestion {
       this.currentItems.push(row);
     }
 
-    const customIdx = q.options.length;
-    const customFocused = customIdx === this.focusedItemIndex;
-    const customText = this.customInputs.get(idx) ?? '';
-    const hasCustomText = customText.trim().length > 0;
+    if (this.config.showCustomInput) {
+      const customIdx = q.options.length;
+      const customFocused = customIdx === this.focusedItemIndex;
+      const customText = this.customInputs.get(idx) ?? '';
+      const hasCustomText = customText.trim().length > 0;
 
-    const customRow = listEl.createDiv({ cls: 'claudian-ask-item claudian-ask-custom-item' });
-    if (customFocused) customRow.addClass('is-focused');
+      const customRow = listEl.createDiv({ cls: 'claudian-ask-item claudian-ask-custom-item' });
+      if (customFocused) customRow.addClass('is-focused');
 
-    customRow.createSpan({ text: customFocused ? '\u203A' : '\u00A0', cls: 'claudian-ask-cursor' });
-    customRow.createSpan({ text: `${customIdx + 1}. `, cls: 'claudian-ask-item-num' });
+      customRow.createSpan({ text: customFocused ? '\u203A' : '\u00A0', cls: 'claudian-ask-cursor' });
+      customRow.createSpan({ text: `${customIdx + 1}. `, cls: 'claudian-ask-item-num' });
 
-    if (isMulti) {
-      this.renderMultiSelectCheckbox(customRow, hasCustomText);
+      if (isMulti) {
+        this.renderMultiSelectCheckbox(customRow, hasCustomText);
+      }
+
+      const inputEl = customRow.createEl('input', {
+        type: 'text',
+        cls: 'claudian-ask-custom-text',
+        placeholder: 'Type something.',
+        value: customText,
+      });
+
+      inputEl.addEventListener('input', () => {
+        this.customInputs.set(idx, inputEl.value);
+        if (!isMulti && inputEl.value.trim()) {
+          selected.clear();
+          this.updateOptionVisuals(idx);
+        }
+        this.updateTabIndicators();
+      });
+      inputEl.addEventListener('focus', () => {
+        this.isInputFocused = true;
+      });
+      inputEl.addEventListener('blur', () => {
+        this.isInputFocused = false;
+      });
+
+      this.currentItems.push(customRow);
     }
 
-    const inputEl = customRow.createEl('input', {
-      type: 'text',
-      cls: 'claudian-ask-custom-text',
-      placeholder: 'Type something.',
-      value: customText,
-    });
-
-    inputEl.addEventListener('input', () => {
-      this.customInputs.set(idx, inputEl.value);
-      if (!isMulti && inputEl.value.trim()) {
-        selected.clear();
-        this.updateOptionVisuals(idx);
-      }
-      this.updateTabIndicators();
-    });
-    inputEl.addEventListener('focus', () => {
-      this.isInputFocused = true;
-    });
-    inputEl.addEventListener('blur', () => {
-      this.isInputFocused = false;
-    });
-
-    this.currentItems.push(customRow);
-
     this.contentArea.createDiv({
-      text: HINTS_TEXT,
+      text: this.config.immediateSelect ? HINTS_TEXT_IMMEDIATE : HINTS_TEXT,
       cls: 'claudian-ask-hints',
     });
   }
@@ -366,6 +391,15 @@ export class InlineAskUserQuestion {
     }
 
     this.updateOptionVisuals(qIdx);
+
+    if (this.config.immediateSelect) {
+      // Resolve immediately with the selected option
+      const result: Record<string, string> = {};
+      result[q.question] = label;
+      this.handleResolve(result);
+      return;
+    }
+
     this.updateTabIndicators();
 
     if (!isMulti) {
@@ -471,11 +505,13 @@ export class InlineAskUserQuestion {
         this.updateFocusIndicator();
         return true;
       case 'ArrowLeft':
+        if (this.config.immediateSelect) return false;
         e.preventDefault();
         e.stopPropagation();
         this.switchTab(this.activeTabIndex - 1);
         return true;
       case 'Tab':
+        if (this.config.immediateSelect) return false;
         e.preventDefault();
         e.stopPropagation();
         if (e.shiftKey) {
@@ -515,6 +551,37 @@ export class InlineAskUserQuestion {
           this.switchTab(this.activeTabIndex + 1);
         }
         return;
+      }
+      return;
+    }
+
+    if (this.config.immediateSelect) {
+      const maxIdx = this.questions[0].options.length - 1;
+      switch (e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          e.stopPropagation();
+          this.focusedItemIndex = Math.min(this.focusedItemIndex + 1, maxIdx);
+          this.updateFocusIndicator();
+          return;
+        case 'ArrowUp':
+          e.preventDefault();
+          e.stopPropagation();
+          this.focusedItemIndex = Math.max(this.focusedItemIndex - 1, 0);
+          this.updateFocusIndicator();
+          return;
+        case 'Enter':
+          e.preventDefault();
+          e.stopPropagation();
+          if (this.focusedItemIndex <= maxIdx) {
+            this.selectOption(0, this.questions[0].options[this.focusedItemIndex].label);
+          }
+          return;
+        case 'Escape':
+          e.preventDefault();
+          e.stopPropagation();
+          this.handleResolve(null);
+          return;
       }
       return;
     }

@@ -2,9 +2,8 @@ import { Notice } from 'obsidian';
 
 import type { ApprovalCallbackOptions, ClaudianService } from '../../../core/agent';
 import { detectBuiltInCommand } from '../../../core/commands';
-import type { ChatMessage } from '../../../core/types';
+import type { ApprovalDecision, ChatMessage } from '../../../core/types';
 import type ClaudianPlugin from '../../../main';
-import { type ApprovalDecision, ApprovalModal } from '../../../shared/modals/ApprovalModal';
 import { InstructionModal } from '../../../shared/modals/InstructionConfirmModal';
 import { appendCurrentNote } from '../../../utils/context';
 import { formatDurationMmSs } from '../../../utils/date';
@@ -13,6 +12,7 @@ import { appendMarkdownSnippet } from '../../../utils/markdown';
 import { COMPLETION_FLAVOR_WORDS } from '../constants';
 import { InlineAskUserQuestion } from '../rendering/InlineAskUserQuestion';
 import type { MessageRenderer } from '../rendering/MessageRenderer';
+import { setToolIcon } from '../rendering/ToolCallRenderer';
 import type { InstructionRefineService } from '../services/InstructionRefineService';
 import type { SubagentManager } from '../services/SubagentManager';
 import type { TitleGenerationService } from '../services/TitleGenerationService';
@@ -55,7 +55,7 @@ export interface InputControllerDeps {
 
 export class InputController {
   private deps: InputControllerDeps;
-  private pendingApprovalModal: ApprovalModal | null = null;
+  private pendingApprovalInline: InlineAskUserQuestion | null = null;
   private pendingAskUserQuestionInline: InlineAskUserQuestion | null = null;
 
   constructor(deps: InputControllerDeps) {
@@ -619,19 +619,81 @@ export class InputController {
 
   async handleApprovalRequest(
     toolName: string,
-    input: Record<string, unknown>,
+    _input: Record<string, unknown>,
     description: string,
-    options?: ApprovalCallbackOptions,
+    approvalOptions?: ApprovalCallbackOptions,
   ): Promise<ApprovalDecision> {
-    const { plugin } = this.deps;
-    return new Promise((resolve) => {
-      const modal = new ApprovalModal(plugin.app, toolName, input, description, (decision) => {
-        this.pendingApprovalModal = null;
-        resolve(decision);
-      }, options);
-      this.pendingApprovalModal = modal;
-      modal.open();
+    const { streamController } = this.deps;
+    const inputContainerEl = this.deps.getInputContainerEl();
+    const parentEl = inputContainerEl.parentElement;
+    if (!parentEl) {
+      return 'cancel';
+    }
+
+    // Build header element with tool info
+    // Use parentEl to create the header (Obsidian DOM APIs), then detach it
+    const headerEl = parentEl.createDiv({ cls: 'claudian-ask-approval-info' });
+    headerEl.remove();
+
+    const toolEl = headerEl.createDiv({ cls: 'claudian-ask-approval-tool' });
+    const iconEl = toolEl.createSpan({ cls: 'claudian-ask-approval-icon' });
+    iconEl.setAttribute('aria-hidden', 'true');
+    setToolIcon(iconEl, toolName);
+    toolEl.createSpan({ text: toolName, cls: 'claudian-ask-approval-tool-name' });
+
+    if (approvalOptions?.decisionReason) {
+      headerEl.createDiv({ text: approvalOptions.decisionReason, cls: 'claudian-ask-approval-reason' });
+    }
+    if (approvalOptions?.blockedPath) {
+      headerEl.createDiv({ text: approvalOptions.blockedPath, cls: 'claudian-ask-approval-blocked-path' });
+    }
+    if (approvalOptions?.agentID) {
+      headerEl.createDiv({ text: `Agent: ${approvalOptions.agentID}`, cls: 'claudian-ask-approval-agent' });
+    }
+
+    headerEl.createDiv({ text: description, cls: 'claudian-ask-approval-desc' });
+
+    // Build options (always include "Always allow" — SDK callback has no toggle)
+    const questionOptions = ['Deny', 'Allow once', 'Always allow'];
+    const input = { questions: [{ question: 'Allow this action?', options: questionOptions }] };
+
+    streamController.hideThinkingIndicator();
+    inputContainerEl.style.display = 'none';
+
+    const result = await new Promise<Record<string, string> | null>((resolve, reject) => {
+      const inline = new InlineAskUserQuestion(
+        parentEl,
+        input,
+        (res: Record<string, string> | null) => {
+          this.pendingApprovalInline = null;
+          inputContainerEl.style.display = '';
+          resolve(res);
+        },
+        undefined,
+        {
+          title: 'Permission required',
+          headerEl,
+          showCustomInput: false,
+          immediateSelect: true,
+        },
+      );
+      this.pendingApprovalInline = inline;
+      try {
+        inline.render();
+      } catch (err) {
+        this.pendingApprovalInline = null;
+        inputContainerEl.style.display = '';
+        reject(err);
+      }
     });
+
+    // Map result to ApprovalDecision
+    if (!result) return 'cancel';
+    const selected = Object.values(result)[0];
+    if (selected === 'Deny') return 'deny';
+    if (selected === 'Allow once') return 'allow';
+    if (selected === 'Always allow') return 'allow-always';
+    return 'cancel';
   }
 
   async handleAskUserQuestion(
@@ -671,10 +733,13 @@ export class InputController {
   }
 
   dismissPendingApproval(): void {
-    if (this.pendingApprovalModal) {
-      this.pendingApprovalModal.close();
-      this.pendingApprovalModal = null;
+    if (this.pendingApprovalInline) {
+      this.pendingApprovalInline.destroy();
+      this.pendingApprovalInline = null;
     }
+  }
+
+  dismissPendingAskUserQuestion(): void {
     if (this.pendingAskUserQuestionInline) {
       this.pendingAskUserQuestionInline.destroy();
       this.pendingAskUserQuestionInline = null;
