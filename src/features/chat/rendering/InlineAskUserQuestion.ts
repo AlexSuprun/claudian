@@ -71,6 +71,10 @@ export class InlineAskUserQuestion {
       return;
     }
 
+    if (this.config.immediateSelect && this.questions.length !== 1) {
+      this.config.immediateSelect = false;
+    }
+
     for (let i = 0; i < this.questions.length; i++) {
       this.answers.set(i, new Set());
       this.customInputs.set(i, '');
@@ -555,22 +559,24 @@ export class InlineAskUserQuestion {
     }
 
     if (this.config.immediateSelect) {
-      const maxIdx = this.questions[0].options.length - 1;
+      const q = this.questions[this.activeTabIndex];
+      const maxIdx = q.options.length - 1;
       if (this.handleNavigationKey(e, maxIdx)) return;
       if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
         if (this.focusedItemIndex <= maxIdx) {
-          this.selectOption(0, this.questions[0].options[this.focusedItemIndex].label);
+          this.selectOption(0, q.options[this.focusedItemIndex].label);
         }
       }
       return;
     }
 
     const isSubmitTab = this.activeTabIndex === this.questions.length;
+    const q = this.questions[this.activeTabIndex];
     const maxFocusIndex = isSubmitTab
       ? 1
-      : this.questions[this.activeTabIndex].options.length;
+      : (this.config.showCustomInput ? q.options.length : q.options.length - 1);
 
     if (this.handleNavigationKey(e, maxFocusIndex)) return;
 
@@ -585,7 +591,6 @@ export class InlineAskUserQuestion {
     }
 
     // Question tab: ArrowRight and Enter
-    const q = this.questions[this.activeTabIndex];
     switch (e.key) {
       case 'ArrowRight':
         e.preventDefault();
@@ -597,7 +602,7 @@ export class InlineAskUserQuestion {
         e.stopPropagation();
         if (this.focusedItemIndex < q.options.length) {
           this.selectOption(this.activeTabIndex, q.options[this.focusedItemIndex].label);
-        } else {
+        } else if (this.config.showCustomInput) {
           this.isInputFocused = true;
           const input = this.contentArea.querySelector(
             '.claudian-ask-custom-text',

@@ -408,6 +408,23 @@ describe('InlineAskUserQuestion', () => {
       expect(items[items.length - 1]?.hasClass('is-focused')).toBe(true);
     });
 
+    it('ArrowDown clamps at last option when custom input is hidden', () => {
+      const input = makeInput([{ question: 'Q', options: ['A', 'B'] }]);
+      const container = createMockEl();
+      const resolve = jest.fn();
+      const widget = new InlineAskUserQuestion(container, input, resolve, undefined, { showCustomInput: false });
+      widget.render();
+      const root = findRoot(container);
+
+      fireKeyDown(root, 'ArrowDown');
+      fireKeyDown(root, 'ArrowDown');
+      fireKeyDown(root, 'ArrowDown');
+
+      const items = findItems(container);
+      expect(items).toHaveLength(2);
+      expect(items[1]?.hasClass('is-focused')).toBe(true);
+    });
+
     it('ArrowUp moves focus up and clamps at 0', () => {
       const input = makeInput([{ question: 'Q', options: ['A', 'B'] }]);
       const { container } = renderWidget(input);

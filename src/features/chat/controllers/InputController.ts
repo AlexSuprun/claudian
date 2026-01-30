@@ -703,6 +703,7 @@ export class InputController {
     config?: InlineAskQuestionConfig,
   ): Promise<Record<string, string> | null> {
     this.deps.streamController.hideThinkingIndicator();
+    const previousDisplay = inputContainerEl.style.display;
     inputContainerEl.style.display = 'none';
 
     return new Promise<Record<string, string> | null>((resolve, reject) => {
@@ -711,7 +712,7 @@ export class InputController {
         input,
         (result: Record<string, string> | null) => {
           setPending(null);
-          inputContainerEl.style.display = '';
+          inputContainerEl.style.display = previousDisplay;
           resolve(result);
         },
         signal,
@@ -722,7 +723,7 @@ export class InputController {
         inline.render();
       } catch (err) {
         setPending(null);
-        inputContainerEl.style.display = '';
+        inputContainerEl.style.display = previousDisplay;
         reject(err);
       }
     });
