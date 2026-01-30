@@ -60,10 +60,10 @@
   opacity: 0.6;
 }
 
-/* Spinner - inside input box on right */
+/* Spinner - inside input box on end side */
 .claudian-inline-spinner {
   position: absolute;
-  right: 8px;
+  inset-inline-end: 8px;
   top: 50%;
   width: 14px;
   height: 14px;
@@ -117,7 +117,7 @@
 .claudian-inline-diff-buttons {
   display: inline-flex;
   gap: 8px;
-  margin-left: 6px;
+  margin-inline-start: 6px;
   background: none !important;
 }
 
